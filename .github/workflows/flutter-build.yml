@@ -1,5 +1,9 @@
 name: Build the flutter version of the RustDesk
 
+permissions:
+  contents: write
+
+
 on:
   workflow_call:
     inputs:
@@ -370,10 +374,15 @@ jobs:
           python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/zenydesk.exe || python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
           popd
           mkdir -p ./SignOutput
-          PACKER_EXE=$(ls ./target/release/*portable-packer.exe 2>/dev/null | head -n 1)
+          PACKER_EXE=$(find ./target/release ./libs/portable/target/release -name "*portable-packer.exe" 2>/dev/null | head -n 1)
+          if [ -z "$PACKER_EXE" ]; then
+            PACKER_EXE=$(ls ./target/release/*portable-packer.exe ./libs/portable/target/release/*portable-packer.exe 2>/dev/null | head -n 1)
+          fi
+          echo "PACKER_EXE=$PACKER_EXE"
           cp "$PACKER_EXE" ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
           cp "$PACKER_EXE" ./SignOutput/zenydesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
           cp "$PACKER_EXE" ./SignOutput/zenydesk.exe
+          cp "$PACKER_EXE" "./SignOutput/zenydesk-host=zenydesk.com,key=AUDVAlSeBDEeu4WOGF1a05C6cXh14ZVxi4RP6L2knVQ=.exe"
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
@@ -414,6 +423,7 @@ jobs:
             ./SignOutput/zenydesk-*.exe
             ./SignOutput/zenydesk.exe
             ./SignOutput/zenydesk.msi
+            ./SignOutput/zenydesk-host=*.exe
 
   # The fallback for the flutter version, we use Sciter for 32bit Windows.
   build-for-windows-sciter:

@@ -1,121 +1,111 @@
-# Repository Guidelines
+# RustDesk Guide
 
-## Product and Authority
+## Project Layout
 
-REA is a local-only reverse-engineering tool with shared CLI/MCP workflows. Distinguish observations, derivations, inferences, and unknowns; preserve Evidence provenance and session semantics through both adapters. Provider support and setup live in [README.md](README.md#choosing-a-deep-analysis-provider) and its linked guides.
+### Directory Structure
+* `src/` Rust app
+* `src/server/` audio / clipboard / input / video / network
+* `src/platform/` platform-specific code
+* `src/ui/` legacy Sciter UI (deprecated)
+* `flutter/` current UI
+* `libs/hbb_common/` config / proto / shared utils
+* `libs/scrap/` screen capture
+* `libs/enigo/` input control
+* `libs/clipboard/` clipboard
+* `libs/hbb_common/src/config.rs` all options
 
-Follow the [contribution scope and fail-closed integration rule](CONTRIBUTING.md#contribution-scope). Do not integrate capabilities while material scope, authority, side-effect, or required verification questions remain unresolved. For new providers or capabilities involving target execution, injection, mutation, or protection recovery, seek the required maintainer scope decision before substantial implementation for integration. Welcome early proposals, small exploratory prototypes, and draft PRs that help resolve questions; they do not authorize integration.
+### Key Components
+- **Remote Desktop Protocol**: Custom protocol implemented in `src/rendezvous_mediator.rs` for communicating with rustdesk-server
+- **Screen Capture**: Platform-specific screen capture in `libs/scrap/`
+- **Input Handling**: Cross-platform input simulation in `libs/enigo/`
+- **Audio/Video Services**: Real-time audio/video streaming in `src/server/`
+- **File Transfer**: Secure file transfer implementation in `libs/hbb_common/`
 
-Ghidra uses ephemeral databases without modifying executable bytes or controlling a GUI; Windows Ghidra P0 has no mutation authority. IDA analysis is read-only; never save or close an attached GUI database.
+### UI Architecture
+- **Legacy UI**: Sciter-based (deprecated) - files in `src/ui/`
+- **Modern UI**: Flutter-based - files in `flutter/`
+  - Desktop: `flutter/lib/desktop/`
+  - Mobile: `flutter/lib/mobile/`
+  - Shared: `flutter/lib/common/` and `flutter/lib/models/`
 
-Configuration changes must be additive and idempotent, with backups. Installers must not install or upgrade unrelated software, including Homebrew, Node.js, npm, Java, or Ghidra. Ghidra and IDA are bring-your-own. `rea setup` must show its planned changes and require approval before writing files or installing Hopper.
+## Rust Rules
 
-Preserve caller-selected inputs and local evidence, including output, URLs, paths, digests, and metadata. Redact transport authentication credentials and explicitly marked sensitive values; do not infer secrecy from names or text patterns. Do not persist the ambient environment merely because a child inherits it.
+* Avoid `unwrap()` / `expect()` in production code.
+* Exceptions:
 
-## Architecture and Cleanup
+  * tests;
+  * lock acquisition where failure means poisoning, not normal control flow.
+* Otherwise prefer `Result` + `?` or explicit handling.
+* Do not ignore errors silently.
+* Avoid unnecessary `.clone()`.
+* Prefer borrowing when practical.
+* Do not add dependencies unless needed.
+* Keep code simple and idiomatic.
 
-Dependencies flow inward: domain semantics and contracts, provider adapters, shared application workflows, then CLI/MCP adapters. Keep engine protocols and provider-specific code out of domain/application layers. See [docs/architecture.mermaid](docs/architecture.mermaid) when changing composition.
+## Tokio Rules
 
-Give each interpretation and resource a clear owner. Consumers must use that owner's parsed facts rather than reinterpret raw source. Preserve identity, omission, uncertainty, and source evidence across boundaries. Retain ownership of resources whose cleanup failed. Reuse `src/process/` supervision and identity primitives; a PID and executable path alone do not establish ownership after exit or reuse.
+* Assume a Tokio runtime already exists.
+* Never create nested runtimes.
+* Never call `Runtime::block_on()` inside Tokio / async code.
+* Do not hide runtime creation inside helpers or libraries.
+* Do not hold locks across `.await`.
+* Prefer `.await`, `tokio::spawn`, channels.
+* Use `spawn_blocking` or dedicated threads for blocking work.
+* Do not use `std::thread::sleep()` in async code.
 
-Keep proof of ownership separate from validity, editability, and readiness. Malformed owned data may still be safely removable. Unresolved identity or applicability must remain unknown rather than be treated as absent, foreign, or aligned.
+## Editing Hygiene
 
-Assess brittleness in touched code during implementation, debugging, review, and maintenance. Fix the producing representation or ownership rule before adding downstream repairs. Normalize once at the owning boundary using format-aware parsers. Remove superseded representations, aliases, wrappers, and redundant tests after verifying affected consumers. Introduce abstractions only when they remove observed complexity.
+* Change only what is required.
+* Prefer the smallest valid diff.
+* Do not refactor unrelated code.
+* Do not make formatting-only changes.
+* Keep naming/style consistent with nearby code.
 
-When fixing a bug, inspect the producing boundary and affected consumers for duplicated interpretation or unclear ownership. Complete any directly related refactor in the same change and remove superseded code. Passing regression tests alone does not establish that the brittleness is resolved. If related cleanup remains, explain what remains and why.
+### Comments
 
-When addressing a review thread, inspect the producing boundary and affected consumers for brittleness. Complete directly related refactoring in the same change. Before resolving the thread, explain the root cause, structural fix, validation, and any remaining cleanup.
+* Avoid comments unless they explain a non-obvious reason, constraint, or workaround.
+* Never restate what the code does; prefer clearer code instead.
+* If the code is self-explanatory, add no comment.
 
-Parse unknown boundary values and model expected failures with the tagged error algebra and `Result`. Preserve partial facts and meaningful failure reasons. Keep identity and lookup values separate from display formatting; preserve source values and explicit unknowns when normalization loses information. Absolute paths, file URLs, and HTTP paths have different semantics.
+### Be minimally invasive
 
-Validate advertised JSON Schemas after SDK conversion against their declared dialect and actual clients. Bind handlers to named contracts with exact types; catalog ordering must never select an operation or schema.
+* Prefer purely additive changes: layer new (`#[cfg]`-gated) blocks or new functions around existing code instead of restructuring it. The ideal diff for a fix adds lines and modifies/deletes none.
+* Do not extract or reshape existing code just to enable your new code; look for a mechanism that leaves existing lines untouched (e.g. hide/show an existing object instead of refactoring its construction into a helper for rebuilding).
+* Put new logic in self-contained functions in the module it belongs to (platform-specific logic in `src/platform/`, with `use` inside the function body to avoid churning shared import blocks). Call sites in shared files (`src/tray.rs`, `src/core_main.rs`, `src/server/connection.rs`, …) should be thin one-line hooks.
 
-## Performance
+## Reviewing a PR
 
-Design analysis workflows and agent interfaces for efficiency from the first
-implementation. Correctness, useful answers, Evidence provenance, caller choices,
-compatibility and safe resource bounds remain required.
+* Review only what the diff introduces. Verify ownership with `gh pr diff` before reporting a finding — if the offending lines are untouched context, it is a pre-existing problem, not this PR's.
+* List pre-existing problems in a separate section at the end, or leave out the ones that are not fatal. Never mix them into the findings the author has to fix.
+* Before re-reviewing, read the author's reply comments. Do not re-raise items they declined on scope grounds.
+* State a finding's consequence exactly: distinguish "the value is lost" from "the shortcut is inert but the value still saves".
 
-Optimize in this order:
+## Localization (`src/lang/*.rs`)
 
-1. Agent tokens and context. Return the smallest sufficient answer with
-   necessary provenance, coverage and limitations. Use task selection,
-   summaries, paging and retained Evidence where supported; honor requested
-   detail and keep complete Evidence accessible. Count the whole task,
-   including schemas, extra calls and retries.
-2. Analysis time. Reuse validated results and shared work. Cache keys must
-   cover result-affecting inputs; define invalidation and lifetime. Validate
-   freshness before reporting cached live state as current.
-3. CPU and memory. Avoid unnecessary work and copies; bound concurrency,
-   retained state and serialization growth.
+Each file is a `HashMap<key, translation>`. Layout:
 
-For changes affecting these costs, measure representative completed tasks and
-compare equivalent workflows before and after where available. Report token
-usage, elapsed time, CPU time and peak process-family memory. Separate cold
-and warm runs, label estimates, and state unmeasured costs. Fewer bytes alone
-do not establish fewer tokens or faster analysis.
+* `template.rs` is the master list of every key. **Never edit it** as part of translation work.
+* `en.rs` holds only the keys whose English display text differs from the key itself.
+* Every other file (`de.rs`, `fr.rs`, …) carries the full key set; an untranslated entry has an empty value: `("key", "")`.
 
-## Development
+### Finding the English source for a key
 
-Use [.nvmrc](.nvmrc) and `package.json#packageManager` for the pinned toolchain. Cursor Cloud may place older Node.js first on `PATH`; environment setup installs the pinned toolchain under `/usr/local/bin`.
+When filling an empty entry, determine the source English text with this rule:
 
-- `npm ci`: install locked dependencies.
-- `npm run build:cached`: build the runtime and packaged skill.
-- `npm run test:local -- PATH...`: source tests without building.
-- `npm run test:focused -- PATH...`: exact tests with their required artifacts.
-- `npm run check:fast`: cached typecheck/lint and the pre-push check.
-- `npm run docs:check`: validate generated documentation.
+* If `key` exists in `en.rs` **with a non-empty value**, that value is the source text (look it up in `en.rs`).
+* Otherwise the **key string itself is the source text** (the key is already plain English).
 
-Use relevant checks for the change. The complete local gate, `npm run check:pr`, is optional for broad changes or CI diagnosis. See [CONTRIBUTING.md](CONTRIBUTING.md) for development, generated-file ownership, and release conventions.
+Then translate that source into the file's target language (infer the language from the file's existing non-empty entries / filename).
 
-`docs/public/product-catalog.json`, `docs/verification/managed-conformance-*.json`, and `skills/` are ignored outputs. Edit source contracts and `.agents/skills/reverse-engineer-anything/`, then regenerate as needed. `.cache/mcp-tool-catalog.json` is test metadata; runtime builds and source checking do not consume it. Never commit binaries, provider project documents, credentials, `dist/`, `node_modules/`, or local planning artifacts.
+### Translation hygiene
 
-## Tool and Test Changes
+* Only fill empty values. Never change keys, and never touch existing non-empty translations.
+* Preserve placeholders (`{}`) and escape sequences (`\n`, `\"`) exactly as in the source.
+* Do not translate brand or technical tokens: `RustDesk`, `Socks5`, `TLS`, `UAC`, `Wayland`, `X11`, `TCP`, `UDP`, `2FA`, `RDP`, `D3D`, etc.
+* Copy URL values (e.g. `doc_*` keys) verbatim from `en.rs`.
 
-For tool design, follow [docs/tool-design.md](docs/tool-design.md): start from the analyst question, reuse existing contracts, preserve caller choices, and return useful evidence inline. Limits must follow real format, protocol, authority, or resource constraints. Account for representation expansion before allocation; derive completeness from examined coverage.
+### Adding new keys (feature work)
 
-For test changes or provider claims, use [docs/testing.md](docs/testing.md). Prefer real public CLI/MCP workflows, then production-boundary integration, then producer goldens. Keep module tests for distinct semantics stronger workflows cannot reliably reproduce. Preserve malformed-input, cancellation, cleanup, permission, capacity, and target-identity coverage when pruning. Report unverified coverage explicitly; simulated providers do not establish real-provider behavior.
-
-Use Conventional Commit subjects and PR titles. Mark breaking changes with `!` or a `BREAKING CHANGE:` footer. Describe behavior changes, relevant validation, and real-provider verification scope.
-
-## Issue Reports
-
-Follow [issue reporting guidance](CONTRIBUTING.md#reporting-issues) and the matching
-issue form. Keep reports concise and cite the smallest useful evidence.
-Distinguish observed results, source-derived reasoning, hypotheses, and proposed
-checks. Never claim runtime reproduction or measurements you did not perform.
-Use `NOT_ENOUGH_INFO` with an explanation for missing narrative answers or evidence.
-Incomplete reports, source-only findings, and early feature or design ideas are
-welcome when their limitations are explicit; a completed diagnosis or fix is not
-required to open an issue.
-
-## Pull Request Readiness
-
-Follow [human ownership and readiness](CONTRIBUTING.md#pull-request-ownership-and-readiness)
-when preparing a PR. AI-assisted contributions are welcome; a human must review
-and own the final diff, check the validation evidence and its limitations, and
-explicitly declare the PR ready for initial maintainer review.
-
-Keep the PR body concise and current, with the concrete problem, observable
-outcome, approach, and evidence. Report only checks that actually ran as executed;
-distinguish source-derived conclusions, proposed checks, and unavailable coverage.
-Address actionable automated review findings and explain disagreements.
-
-Leave the template's **Author readiness** declarations unchecked for the human
-owner to complete. Never attest to human review on their behalf. Keep the PR in
-draft until the human declares the PR initially ready. Later pushes do not
-invalidate that declaration or require another human sign-off. Keep the PR body
-and affected validation current as work changes. The readiness check validates
-the filled declaration; CI and automated review results do not establish that
-human review occurred, maintainer scope approval, or merge permission.
-
-<!-- BEGIN:turborepo-agent-rules -->
-
-# This is NOT the Turborepo you know
-
-Turborepo configuration, task behavior, and CLI commands can vary between installed versions and may differ from your training data. Resolve the `turbo` package from this file's directory or relevant workspace; in monorepos, it may not be visible from the repository root. For example, run `node -p "require.resolve('turbo/package.json')"` from a workspace that depends on `turbo`.
-
-Read `docs/README.md` inside that installed package first, then read the relevant pages from its `docs/` directory before changing Turborepo configuration or commands. Heed deprecation notices. These bundled docs match the installed package version and are available without network access.
-
-This block is written and re-added by `turbo` before repository-scoped commands when an AI agent is detected. In the Turborepo source repository, its template is defined in `crates/turborepo-cli/src/cli/agent_guidance.rs`. Removing the managed block while updates are enabled means a later qualifying invocation will add it again. Set `"agentGuidance": false` in the root `turbo.json` or `turbo.jsonc` to opt out; this does not remove an existing block. Keep the block committed with your work to avoid an uncommitted change on the next agent invocation.
-<!-- END:turborepo-agent-rules -->
+* New English-text keys use sentence case, not Title Case: `Use ID whitelisting`, **not** `Use ID Whitelisting`. Acronyms (ID, IP, 2FA…) stay uppercase. Legacy Title-Case keys (e.g. `Use IP Whitelisting`) stay as-is — do not rename them.
+* Since the key itself is the English display text, a sentence-case key usually needs **no** `en.rs` entry; add one only when the display text must differ from the key (e.g. `*_tip` keys).
+* Append each new key to `template.rs` (with `""`) and to every `src/lang/*.rs` file (translated, or `""` if unsure), at the end of the list.

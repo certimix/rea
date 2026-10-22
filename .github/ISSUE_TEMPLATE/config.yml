@@ -1,11 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Contribution scope and integration requirements
-    url: https://github.com/morluto/rea/blob/main/CONTRIBUTING.md#contribution-scope
-    about: Check supported capabilities, excluded workflows, and the fail-closed integration rule before proposing a feature.
-  - name: REA Documentation
-    url: https://github.com/morluto/rea#readme
-    about: Read the README and AGENTS.md for usage guides and configuration details.
-  - name: Question or Discussion
-    url: https://github.com/morluto/rea/discussions
-    about: Please ask questions and start discussions here.
+  - name: Feature Request
+    url: https://github.com/rustdesk/rustdesk/discussions/categories/feature-request
+    about: Discuss ideas for new features or enhancements, it will be converted to GitHub issue when we commit to building those changes or are helping a community member contribute their own changes
+  - name: Ask a question
+    url: https://github.com/rustdesk/rustdesk/discussions/category_choices
+    about: Ask questions and discuss with other community members.
